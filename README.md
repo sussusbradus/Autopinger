@@ -1,3 +1,2 @@
 # Autopinger
-Discord bot
-a
+Discord bot that spam pings
