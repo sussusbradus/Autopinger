@@ -1,0 +1,2 @@
+# Autopinger
+Discord bot
