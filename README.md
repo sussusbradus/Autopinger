@@ -23,3 +23,5 @@ Developed by bradus
 Contributors:
 Willow,
 Alec (EW)
+
+Version Alpha 0.7.3

@@ -62,7 +62,7 @@ async def fuckyou(ctx):
 @bot.command()
 async def version(ctx):
     await ctx.send(
-        "Autopinger (Name not final) Alpha 0.6.4"
+        "Autopinger (Name not final) Alpha 0.7.3"
     )
 
 #send a singular message
