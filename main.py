@@ -50,7 +50,7 @@ active_loops = {}
 @bot.check
 async def check_banlist(ctx):
     if ctx.author.id in banned_users:
-        await ctx.send("fuck you")
+        await ctx.send("yea no fuck you :joy:")
         return False
     return True
 
@@ -97,13 +97,13 @@ async def test(ctx):
 # joke
 @bot.command()
 async def fuckyou(ctx):
-    await ctx.send("Yeah im pissed now")
+    await ctx.send("yea im pissed now")
 
 
 # version
 @bot.command()
 async def version(ctx):
-    await ctx.send("Autopinger (Name not final) Alpha 0.7.3")
+    await ctx.send("Autopinger (Name not final) Alpha 0.7.6")
 
 
 # send a singular message
@@ -143,7 +143,7 @@ async def _infsend_loop(ctx, message):
 async def repeat(ctx, times: int, *, message):
     if ctx.channel.id in active_loops:
         await ctx.send(
-            "A loop is already running in this channel. Use a!stop first."
+            "A loop is already running in this channel. Use a!stop first"
         )
         return
     task = asyncio.create_task(_repeat_loop(ctx, times, message))
@@ -155,7 +155,7 @@ async def repeat(ctx, times: int, *, message):
 async def infsend(ctx, *, message):
     if ctx.channel.id in active_loops:
         await ctx.send(
-            "A loop is already running in this channel. Use a!stop first."
+            "A loop is already running in this channel. Use a!stop first"
         )
         return
     task = asyncio.create_task(_infsend_loop(ctx, message))
@@ -168,7 +168,7 @@ async def stop(ctx):
     task = active_loops.pop(ctx.channel.id, None)
     if task:
         task.cancel()
-        await ctx.send("Ping loop stopped.")
+        await ctx.send("Ping loop stopped")
     else:
         await ctx.send("No loops running in this channel right now")
 
