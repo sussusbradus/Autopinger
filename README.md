@@ -13,11 +13,6 @@ Stupid autopinger bot that spams a determined message
 
 # DO NOT ADD THIS BOT UNLESS YOU WANT TO ANNOY PEOPLE. IT SOLE PURPOSE IS TO SPAM
 
-Avoid using it if you:
-- Own a Community Server
-- Have people who hate being spam pinged
-- Violates any rules in your server
-
 Developed by bradus 
 
 Contributors:
