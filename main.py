@@ -240,7 +240,7 @@ async def stopall(interaction: discord.Interaction):
     await interaction.response.send_message(f"Stopped {count} running loop(s)")
 
 
-# manual resync, owner only — handy if you change command names or options
+# manual resync, owner only
 @bot.command()
 @commands.is_owner()
 async def sync(ctx):
