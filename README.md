@@ -6,7 +6,6 @@ Stupid autopinger bot that spams a determined message
 
 - Changeable intervals
 - Permissions to specific commands
-- Transition to slash commands
 - Image integration
 - Random messages instead of predetermined
 - Spam in mutliple channels with 1 command
@@ -19,4 +18,4 @@ Contributors:
 Willow,
 Alec (EW)
 
-Version Alpha 0.7.6
+Version Beta 1.0.0
