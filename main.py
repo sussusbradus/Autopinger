@@ -62,6 +62,12 @@ class Autopinger(commands.Bot):
             intents=intents,
             help_command=None,
             tree_cls=BanlistTree,
+            # Blocks @everyone/@here (and role pings) from ANY message the bot
+            # sends, including whatever text users pass into /send, /repeat,
+            # and /infsend. Direct user mentions are still allowed.
+            allowed_mentions=discord.AllowedMentions(
+                everyone=False, roles=False, users=True
+            ),
         )
 
     async def setup_hook(self):
