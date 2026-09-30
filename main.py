@@ -11,11 +11,8 @@ from discord.ext import commands
 load_dotenv()
 token = os.getenv("token")
 
-# Set this to your server's ID for instant command updates while developing.
-# Leave as None to sync globally (can take up to an hour to propagate).
 GUILD_ID = None
 
-# --- BANLIST MANAGEMENT ---
 BANLIST_FILE = "banlist.jsonc" if os.path.exists("banlist.jsonc") else "banlist.json"
 
 
@@ -62,9 +59,6 @@ class Autopinger(commands.Bot):
             intents=intents,
             help_command=None,
             tree_cls=BanlistTree,
-            # Blocks @everyone/@here (and role pings) from ANY message the bot
-            # sends, including whatever text users pass into /send, /repeat,
-            # and /infsend. Direct user mentions are still allowed.
             allowed_mentions=discord.AllowedMentions(
                 everyone=False, roles=False, users=True
             ),
