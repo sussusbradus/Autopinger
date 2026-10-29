@@ -18,9 +18,14 @@ token = os.getenv("token")
 
 GUILD_ID = None
 
-DATA_FILE = "data.json"  # created and managed by the bot itself
-LEGACY_PERMISSIONS_FILE = "permissions.json"  # old versions; imported if found
-LEGACY_BANLIST_FILES = ("banlist.jsonc", "banlist.json")  # old versions; imported once
+# Saved files sit next to main.py no matter where the bot is launched from
+BASE_DIR = os.path.dirname(os.path.abspath(__file__))
+DATA_FILE = os.path.join(BASE_DIR, "data.json")  # created and managed by the bot itself
+LEGACY_PERMISSIONS_FILE = os.path.join(BASE_DIR, "permissions.json")  # imported if found
+LEGACY_BANLIST_FILES = (  # old versions; imported once
+    os.path.join(BASE_DIR, "banlist.jsonc"),
+    os.path.join(BASE_DIR, "banlist.json"),
+)
 
 # Commands only admins and the bot owner can use until a role is allowed with
 # /perms allow (for example: /perms allow command:ban role:@Moderators)
@@ -350,19 +355,19 @@ async def safe_send(channel, content, prepared):
 def parse_channels(guild, text):
     """Turn 'a, #b <#123> 456' into (channels found, names that weren't found)."""
     found, unknown, seen = [], [], set()
-    for token in re.split(r"[,\s]+", text.strip()):
-        if not token:
+    for part in re.split(r"[,\s]+", text.strip()):
+        if not part:
             continue
-        match = re.fullmatch(r"<#(\d+)>|(\d{15,20})", token)
+        match = re.fullmatch(r"<#(\d+)>|(\d{15,20})", part)
         if match:
             channel = guild.get_channel_or_thread(int(match.group(1) or match.group(2)))
         else:
-            name = token.lstrip("#").lower()
+            name = part.lstrip("#").lower()
             channel = discord.utils.find(
                 lambda c: c.name.lower() == name, guild.text_channels
             )
         if channel is None or not isinstance(channel, discord.abc.Messageable):
-            unknown.append(token)
+            unknown.append(part)
             continue
         if channel.id not in seen:
             seen.add(channel.id)
@@ -511,7 +516,7 @@ async def test(interaction: discord.Interaction):
 # version
 @bot.tree.command(name="version", description="Show the current bot version")
 async def version(interaction: discord.Interaction):
-    await interaction.response.send_message("Autopinger (Name not final) Alpha 0.7.6")
+    await interaction.response.send_message("Autopinger (Name not final) Release 1")
 
 
 # send a singular message
@@ -546,7 +551,9 @@ async def send(
     prepared = await read_image(image)
 
     if not multi:
-        await interaction.followup.send(message, file=make_file(prepared))
+        # file=None isn't accepted by followup.send, so only pass it when there is one
+        kwargs = {"file": make_file(prepared)} if prepared is not None else {}
+        await interaction.followup.send(message, **kwargs)
         return
 
     targets, notes = resolve_targets(
@@ -1195,4 +1202,10 @@ async def sync(ctx):
     await ctx.send(f"Synced {len(synced)} command(s)")
 
 
-bot.run(token)
+if __name__ == "__main__":
+    if not token:
+        raise SystemExit(
+            "No bot token found. Put token=YOUR_TOKEN in a .env file, "
+            "or enter it in the toggle window."
+        )
+    bot.run(token)

@@ -1,0 +1,9 @@
+{
+  "permissions": {},
+  "access": {},
+  "bans": {
+    "global": [],
+    "guilds": {}
+  },
+  "legacy_banlist_imported": true
+}
