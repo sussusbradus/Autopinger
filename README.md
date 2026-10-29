@@ -2,15 +2,17 @@
 
 Stupid autopinger bot that spams a determined message
 
-# UPCOMING PLANS (MIGHT change in the future)
-
-- Changeable intervals
-- Permissions to specific commands
+# MASSIVE UPDATE (RELEASE 1)
+- Permissions
+- Interchangeable times
+- Toggle window for easier use (seperate file)
+- Banlist rework
 - Image integration
-- Random messages instead of predetermined
-- Spam in mutliple channels with 1 command
+- bot token bs
+- channel usage
+- Set up command
 
-# DO NOT ADD THIS BOT UNLESS YOU WANT TO ANNOY PEOPLE. IT SOLE PURPOSE IS TO SPAM
+- blah bllah bllah
 
 Developed by bradus 
 
@@ -18,4 +20,4 @@ Contributors:
 Willow,
 Alec (EW)
 
-Version Beta 1.0.0
+Version Release 1
