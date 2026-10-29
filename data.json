@@ -1,6 +1,12 @@
 {
   "permissions": {},
-  "access": {},
+  "access": {
+    "1549556458704863262": {
+      "mode": "selected",
+      "roles": [],
+      "users": []
+    }
+  },
   "bans": {
     "global": [],
     "guilds": {}
