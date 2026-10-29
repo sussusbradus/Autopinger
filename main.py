@@ -501,7 +501,7 @@ async def help_command(interaction: discord.Interaction):
         "/stop (Quit ping loops here, or in the Channels you list)\n"
         "/stopall (Quit all ping loops)\n"
         "/ban, /unban, /banlist (Admins, or roles allowed with /perms - block people from the bot)\n"
-        "/setup (Admins only - choose who can use the bot at all)\n"
+        "/setup (Admins only - panel for bot access, per-command permissions and bans)\n"
         "/perms allow|remove|lock|reset|list (Admins only - control who can use which command)\n"
         "Channels: separate several with commas, e.g. #one, #two\n"
     )
@@ -735,21 +735,78 @@ async def stopall(interaction: discord.Interaction):
 HAS_SELECT_DEFAULTS = hasattr(discord, "SelectDefaultValue")  # discord.py 2.4+
 
 
+def role_defaults(guild, ids):
+    return [
+        discord.SelectDefaultValue(id=r, type=discord.SelectDefaultValueType.role)
+        for r in ids
+        if guild.get_role(r)
+    ][:25]
+
+
+def user_defaults(ids):
+    return [
+        discord.SelectDefaultValue(id=u, type=discord.SelectDefaultValueType.user)
+        for u in ids
+    ][:25]
+
+
+def mentions(roles=(), users=()):
+    parts = [f"<@&{r}>" for r in roles] + [f"<@{u}>" for u in users]
+    return ", ".join(parts)
+
+
 def setup_text(guild_id):
     access = get_access(guild_id)
     if access["mode"] != "selected":
         return (
-            "**Bot access: everyone**\n"
-            "Anyone in this server can use the bot. "
-            "Press the button to limit it to chosen roles and users."
+            "**Bot setup**\n"
+            "**Who can use the bot:** everyone\n"
+            "Use the button to limit it to chosen roles and users, or open "
+            "**Command permissions** / **Bans** to manage things without typing commands."
         )
     roles = ", ".join(f"<@&{r}>" for r in access["roles"]) or "none"
     users = ", ".join(f"<@{u}>" for u in access["users"]) or "none"
     return (
-        "**Bot access: only selected people**\n"
+        "**Bot setup**\n"
+        "**Who can use the bot:** only selected people\n"
         f"Allowed roles: {roles}\n"
         f"Allowed users: {users}\n"
         "Admins and the bot owner can always use the bot."
+    )[:2000]
+
+
+def perms_page_text(guild_id, command):
+    if command is None:
+        return (
+            "**Command permissions**\n"
+            "Pick a command below, then choose which roles and users may use it.\n"
+            "Admins and the bot owner can always use every command."
+        )
+    rule = get_rule(guild_id, command)
+    if rule is None:
+        if command in LOCKED_BY_DEFAULT:
+            state = "admins and the bot owner only (default)"
+        else:
+            state = "everyone (no rule set)"
+    else:
+        who = mentions(rule["roles"], rule["users"])
+        state = who if who else "admins and the bot owner only (locked)"
+    return (
+        f"**Command permissions: /{command}**\n"
+        f"Currently usable by: {state}\n"
+        "Choosing roles or users below replaces the list. "
+        "**Open to everyone** removes the rule."
+    )[:2000]
+
+
+def bans_page_text(guild_id):
+    here = bans["guilds"].get(str(guild_id), [])
+    listing = ", ".join(f"<@{u}>" for u in here) if here else "nobody"
+    return (
+        "**Bans (this server)**\n"
+        f"Banned from the bot here: {listing}\n"
+        "Pick people in the first menu to ban them, or use the second to unban. "
+        "Bans everywhere are bot-owner only (/ban everywhere:True)."
     )[:2000]
 
 
@@ -758,6 +815,9 @@ class SetupView(discord.ui.View):
         super().__init__(timeout=300)
         self.guild = guild
         self.author_id = author_id
+        self.page = "main"  # "main", "perms" or "bans"
+        self.command = None  # command being edited on the perms page
+        self.notice = ""  # one-off message shown after an action
         self.build()
 
     async def interaction_check(self, interaction: discord.Interaction) -> bool:
@@ -768,21 +828,44 @@ class SetupView(discord.ui.View):
         )
         return False
 
+    def current_text(self):
+        if self.page == "perms":
+            text = perms_page_text(self.guild.id, self.command)
+        elif self.page == "bans":
+            text = bans_page_text(self.guild.id)
+        else:
+            text = setup_text(self.guild.id)
+        if self.notice:
+            text += f"\n\n{self.notice}"
+        return text[:2000]
+
+    # ------------------------------------------------------------ building
     def build(self):
         self.clear_items()
+        if self.page == "perms":
+            self.build_perms()
+        elif self.page == "bans":
+            self.build_bans()
+        else:
+            self.build_main()
+
+    def add_button(self, text, callback, style=discord.ButtonStyle.secondary, disabled=False):
+        button = discord.ui.Button(label=text, style=style, disabled=disabled)
+        button.callback = callback
+        self.add_item(button)
+        return button
+
+    def build_main(self):
         access = get_access(self.guild.id)
         limited = access["mode"] == "selected"
 
-        self.toggle = discord.ui.Button(
-            label=(
-                "Mode: selected people only (click to open to everyone)"
-                if limited
-                else "Mode: everyone (click to limit to selected people)"
-            ),
-            style=discord.ButtonStyle.primary if limited else discord.ButtonStyle.success,
+        self.add_button(
+            "Limited to selected people" if limited else "Open to everyone",
+            self.on_toggle,
+            discord.ButtonStyle.primary if limited else discord.ButtonStyle.success,
         )
-        self.toggle.callback = self.on_toggle
-        self.add_item(self.toggle)
+        self.add_button("Command permissions", self.go_perms)
+        self.add_button("Bans", self.go_bans)
 
         role_kwargs = dict(
             placeholder="Roles allowed to use the bot", min_values=0, max_values=25
@@ -791,20 +874,8 @@ class SetupView(discord.ui.View):
             placeholder="Users allowed to use the bot", min_values=0, max_values=25
         )
         if HAS_SELECT_DEFAULTS:
-            # Show what's currently selected
-            roles = [
-                discord.SelectDefaultValue(
-                    id=r, type=discord.SelectDefaultValueType.role
-                )
-                for r in access["roles"]
-                if self.guild.get_role(r)
-            ][:25]
-            users = [
-                discord.SelectDefaultValue(
-                    id=u, type=discord.SelectDefaultValueType.user
-                )
-                for u in access["users"]
-            ][:25]
+            roles = role_defaults(self.guild, access["roles"])
+            users = user_defaults(access["users"])
             if roles:
                 role_kwargs["default_values"] = roles
             if users:
@@ -821,13 +892,117 @@ class SetupView(discord.ui.View):
         self.user_select.callback = self.on_users
         self.add_item(self.user_select)
 
+    def build_perms(self):
+        names = sorted(valid_commands())[:25]
+        options = []
+        for name in names:
+            rule = get_rule(self.guild.id, name)
+            if rule is not None:
+                desc = "Custom rule"
+            elif name in LOCKED_BY_DEFAULT:
+                desc = "Admins only (default)"
+            else:
+                desc = "Everyone"
+            options.append(
+                discord.SelectOption(
+                    label=f"/{name}",
+                    value=name,
+                    description=desc,
+                    default=(name == self.command),
+                )
+            )
+        self.command_select = discord.ui.Select(
+            placeholder="Choose a command to edit", options=options
+        )
+        self.command_select.callback = self.on_command
+        self.add_item(self.command_select)
+
+        editing = self.command is not None
+        rule = get_rule(self.guild.id, self.command) if editing else None
+        role_kwargs = dict(
+            placeholder="Roles allowed to use it",
+            min_values=0,
+            max_values=25,
+            disabled=not editing,
+        )
+        user_kwargs = dict(
+            placeholder="Users allowed to use it",
+            min_values=0,
+            max_values=25,
+            disabled=not editing,
+        )
+        if HAS_SELECT_DEFAULTS and rule is not None:
+            roles = role_defaults(self.guild, rule["roles"])
+            users = user_defaults(rule["users"])
+            if roles:
+                role_kwargs["default_values"] = roles
+            if users:
+                user_kwargs["default_values"] = users
+
+        self.cmd_role_select = discord.ui.RoleSelect(**role_kwargs)
+        self.cmd_role_select.callback = self.on_cmd_roles
+        self.add_item(self.cmd_role_select)
+
+        self.cmd_user_select = discord.ui.UserSelect(**user_kwargs)
+        self.cmd_user_select.callback = self.on_cmd_users
+        self.add_item(self.cmd_user_select)
+
+        self.add_button(
+            "Admins only", self.on_cmd_lock, discord.ButtonStyle.danger, disabled=not editing
+        )
+        self.add_button(
+            "Open to everyone",
+            self.on_cmd_open,
+            discord.ButtonStyle.success,
+            disabled=not editing,
+        )
+        self.add_button("Back", self.go_main)
+
+    def build_bans(self):
+        self.ban_select = discord.ui.UserSelect(
+            placeholder="Ban people from the bot here", min_values=1, max_values=5
+        )
+        self.ban_select.callback = self.on_ban
+        self.add_item(self.ban_select)
+
+        banned = list(bans["guilds"].get(str(self.guild.id), []))[:25]
+        if banned:
+            options = [
+                discord.SelectOption(label=user_label(uid)[:100], value=str(uid))
+                for uid in banned
+            ]
+            self.unban_select = discord.ui.Select(
+                placeholder="Unban people",
+                options=options,
+                min_values=1,
+                max_values=len(options),
+            )
+            self.unban_select.callback = self.on_unban
+            self.add_item(self.unban_select)
+
+        self.add_button("Back", self.go_main)
+
+    # ------------------------------------------------------------- helpers
     async def refresh(self, interaction: discord.Interaction):
         save_data()
         self.build()
-        await interaction.response.edit_message(
-            content=setup_text(self.guild.id), view=self
-        )
+        text = self.current_text()
+        self.notice = ""
+        await interaction.response.edit_message(content=text, view=self)
 
+    async def go_main(self, interaction: discord.Interaction):
+        self.page = "main"
+        await self.refresh(interaction)
+
+    async def go_perms(self, interaction: discord.Interaction):
+        self.page = "perms"
+        await self.refresh(interaction)
+
+    async def go_bans(self, interaction: discord.Interaction):
+        self.page = "bans"
+        await self.refresh(interaction)
+
+    # ------------------------------------------------------------ main page
     async def on_toggle(self, interaction: discord.Interaction):
         access = get_access(self.guild.id)
         access["mode"] = "everyone" if access["mode"] == "selected" else "selected"
@@ -839,6 +1014,69 @@ class SetupView(discord.ui.View):
 
     async def on_users(self, interaction: discord.Interaction):
         get_access(self.guild.id)["users"] = [u.id for u in self.user_select.values]
+        await self.refresh(interaction)
+
+    # ----------------------------------------------------- permissions page
+    async def on_command(self, interaction: discord.Interaction):
+        self.command = self.command_select.values[0]
+        await self.refresh(interaction)
+
+    async def on_cmd_roles(self, interaction: discord.Interaction):
+        rule = get_rule(self.guild.id, self.command, create=True)
+        rule["roles"] = [r.id for r in self.cmd_role_select.values]
+        await self.refresh(interaction)
+
+    async def on_cmd_users(self, interaction: discord.Interaction):
+        rule = get_rule(self.guild.id, self.command, create=True)
+        rule["users"] = [u.id for u in self.cmd_user_select.values]
+        await self.refresh(interaction)
+
+    async def on_cmd_lock(self, interaction: discord.Interaction):
+        rule = get_rule(self.guild.id, self.command, create=True)
+        rule["roles"].clear()
+        rule["users"].clear()
+        await self.refresh(interaction)
+
+    async def on_cmd_open(self, interaction: discord.Interaction):
+        permissions.get(str(self.guild.id), {}).pop(self.command, None)
+        if self.command in LOCKED_BY_DEFAULT:
+            self.notice = f"/{self.command} is back to its default (admins only)."
+        await self.refresh(interaction)
+
+    # ------------------------------------------------------------ bans page
+    async def on_ban(self, interaction: discord.Interaction):
+        owner = await bot.is_owner(interaction.user)
+        banned = guild_ban_list(self.guild.id)
+        added, skipped = [], []
+        for user in self.ban_select.values:
+            member = self.guild.get_member(user.id)
+            if user.id == interaction.user.id or user.bot or await bot.is_owner(user):
+                skipped.append(f"<@{user.id}>")
+            elif not owner and member is not None and member.guild_permissions.administrator:
+                skipped.append(f"<@{user.id}> (administrator)")
+            elif user.id in banned:
+                skipped.append(f"<@{user.id}> (already banned)")
+            else:
+                banned.append(user.id)
+                added.append(f"<@{user.id}>")
+        notes = []
+        if added:
+            notes.append("Banned: " + ", ".join(added))
+        if skipped:
+            notes.append("Couldn't ban: " + ", ".join(skipped))
+        self.notice = "\n".join(notes)
+        await self.refresh(interaction)
+
+    async def on_unban(self, interaction: discord.Interaction):
+        banned = guild_ban_list(self.guild.id)
+        lifted = []
+        for value in self.unban_select.values:
+            uid = int(value)
+            if uid in banned:
+                banned.remove(uid)
+                lifted.append(f"<@{uid}>")
+        if lifted:
+            self.notice = "Unbanned: " + ", ".join(lifted)
         await self.refresh(interaction)
 
 
@@ -854,7 +1092,7 @@ async def setup(interaction: discord.Interaction):
         return
     view = SetupView(interaction.guild, interaction.user.id)
     await interaction.response.send_message(
-        setup_text(interaction.guild_id), view=view, ephemeral=True
+        view.current_text(), view=view, ephemeral=True
     )
 
 
