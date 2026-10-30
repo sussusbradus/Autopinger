@@ -308,18 +308,6 @@ async def on_ready():
     print(f"Loaded {len(bans['global'])} global ban(s) and "
           f"{sum(len(v) for v in bans['guilds'].values())} server ban(s)")
 
-
-# logger
-@bot.event
-async def on_message(message):
-    if message.author.bot:
-        return
-
-    print(f"[{message.guild}] {message.author}: {message.content}")
-
-    await bot.process_commands(message)
-
-
 @bot.tree.error
 async def on_app_command_error(
     interaction: discord.Interaction, error: app_commands.AppCommandError
@@ -553,7 +541,7 @@ async def test(interaction: discord.Interaction):
 # version
 @bot.tree.command(name="version", description="Show the current bot version")
 async def version(interaction: discord.Interaction):
-    await interaction.response.send_message("Autopinger (Name not final) Release 1")
+    await interaction.response.send_message("Autopinger Release 1.1")
 
 
 # send a singular message

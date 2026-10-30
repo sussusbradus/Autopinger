@@ -1,6 +1,7 @@
 # Autopinger
 
-Stupid autopinger bot that spams a determined message
+Auto pinger! everyones favorite spam pinging bot!
+Self explanitory, repeats a message over and over again with some cool options to make it managable
 
 # MASSIVE UPDATE (RELEASE 1)
 - Permissions
@@ -12,12 +13,19 @@ Stupid autopinger bot that spams a determined message
 - channel usage
 - Set up command
 
-- blah bllah bllah
+# Release 1.1
+- Admin toggle (not for public use)
+- Upgrades to set up command
+- Join server message idk
+- Removed logger cuz it wasnt even supposed to be in here
 
+# Credits
 Developed by bradus 
 
 Contributors:
 Willow,
 Alec (EW)
 
-Version Release 1
+Version Release 1.1
+
+Yes the development of this bot did use AI, I'd rather be a chud and admit it than be a coward
