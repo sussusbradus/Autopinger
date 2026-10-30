@@ -4,17 +4,24 @@
     "1549556458704863262": {
       "mode": "selected",
       "roles": [],
-      "users": []
+      "users": [
+        1324157130852270091
+      ]
     },
     "1547754589854376076": {
       "mode": "selected",
       "roles": [],
-      "users": []
+      "users": [
+        1324157130852270091
+      ]
     }
   },
   "bans": {
     "global": [],
     "guilds": {}
   },
-  "legacy_banlist_imported": true
+  "legacy_banlist_imported": true,
+  "welcomed": [
+    1547754589854376076
+  ]
 }

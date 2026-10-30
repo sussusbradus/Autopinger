@@ -5,6 +5,7 @@ import os
 import random
 import re
 import string
+import time
 from typing import List, Optional
 
 from dotenv import load_dotenv
@@ -30,6 +31,11 @@ LEGACY_BANLIST_FILES = (  # old versions; imported once
 # Commands only admins and the bot owner can use until a role is allowed with
 # /perms allow (for example: /perms allow command:ban role:@Moderators)
 LOCKED_BY_DEFAULT = {"ban", "unban", "banlist"}
+
+# Commands that only make sense inside a server. Every other command is also
+# offered in DMs and group chats, and can be installed on a person's account
+# ("User Install" in the Developer Portal) so it works in anyone's DMs.
+SERVER_ONLY = {"setup", "ban", "unban", "banlist", "perms"}
 
 # Delay (in seconds) between messages for loops
 DEFAULT_DELAY = 1.0
@@ -162,6 +168,13 @@ async def can_manage(interaction: discord.Interaction) -> bool:
     return isinstance(user, discord.Member) and user.guild_permissions.administrator
 
 
+def is_server_admin(interaction: discord.Interaction) -> bool:
+    """A real administrator of this server. The bot owner does NOT count unless
+    they're also an admin here, so /setup can't be used in servers you don't run."""
+    user = interaction.user
+    return isinstance(user, discord.Member) and user.guild_permissions.administrator
+
+
 async def can_use(interaction: discord.Interaction, command_name: str) -> bool:
     if interaction.guild is None:
         return True
@@ -228,11 +241,17 @@ class BanlistTree(app_commands.CommandTree):
             return True
 
         name = (interaction.data or {}).get("name")
-        # /setup and /perms are strictly admin / bot owner, whatever Discord's
-        # per-server command overrides say
-        if name in ("perms", "setup") and not await can_manage(interaction):
+        # /setup is for server administrators only (not even the bot owner, unless
+        # they're an admin there), whatever Discord's per-server overrides say
+        if name == "setup" and not is_server_admin(interaction):
             await interaction.response.send_message(
-                f"Only the bot owner or server administrators can use /{name}.",
+                "Only server administrators can use /setup.", ephemeral=True
+            )
+            return False
+        # /perms is admins and the bot owner
+        if name == "perms" and not await can_manage(interaction):
+            await interaction.response.send_message(
+                "Only the bot owner or server administrators can use /perms.",
                 ephemeral=True,
             )
             return False
@@ -259,6 +278,22 @@ class Autopinger(commands.Bot):
         )
 
     async def setup_hook(self):
+        # Offer the everyday commands in DMs / group chats and as user-installed
+        # commands (needs discord.py 2.4+)
+        if hasattr(app_commands, "AppInstallationType"):
+            installs = app_commands.AppInstallationType(guild=True, user=True)
+            contexts = app_commands.AppCommandContext(
+                guild=True, dm_channel=True, private_channel=True
+            )
+            for command in self.tree.get_commands():
+                if command.name not in SERVER_ONLY:
+                    command.allowed_installs = installs
+                    command.allowed_contexts = contexts
+        else:
+            print("discord.py is older than 2.4: commands can't be used in DMs "
+                  "of people who don't share a server with the bot. "
+                  "Update with: pip install -U discord.py")
+
         if GUILD_ID:
             guild = discord.Object(id=GUILD_ID)
             self.tree.copy_global_to(guild=guild)
@@ -307,6 +342,18 @@ async def on_ready():
     print(f"Logged in as {bot.user}")
     print(f"Loaded {len(bans['global'])} global ban(s) and "
           f"{sum(len(v) for v in bans['guilds'].values())} server ban(s)")
+
+
+# logger
+@bot.event
+async def on_message(message):
+    if message.author.bot:
+        return
+
+    print(f"[{message.guild}] {message.author}: {message.content}")
+
+    await bot.process_commands(message)
+
 
 @bot.tree.error
 async def on_app_command_error(
@@ -377,6 +424,30 @@ async def safe_send(channel, content, prepared):
         return False
 
 
+async def send_in_dm(channel, content, prepared, interaction, use_followup):
+    """Send one message in a DM / group chat. Returns (sent, use_followup).
+
+    The bot isn't a member of someone else's DM, so channel.send is refused there.
+    When that happens we switch to the command's follow-up replies, which work for
+    about 15 minutes after the command was used.
+    """
+    kwargs = {"file": make_file(prepared)} if prepared is not None else {}
+    if not use_followup:
+        try:
+            await channel.send(content, **kwargs)
+            return True, False
+        except discord.HTTPException:
+            use_followup = True  # fall through and use the follow-up instead
+            kwargs = {"file": make_file(prepared)} if prepared is not None else {}
+    try:
+        await interaction.followup.send(content or discord.utils.MISSING, ephemeral=False, **kwargs)
+        return True, True
+    except discord.HTTPException as e:
+        print(f"Stopped sending in {label(channel)}: {e} "
+              "(follow-ups stop working 15 minutes after the command was used)")
+        return False, True
+
+
 def parse_channels(guild, text):
     """Turn 'a, #b <#123> 456' into (channels found, names that weren't found)."""
     found, unknown, seen = [], [], set()
@@ -407,7 +478,10 @@ def resolve_targets(interaction, channels_text, needs_files=False, check_busy=Tr
 
     # No channels given (or in a DM): just use the current channel
     if guild is None or not channels_text or not channels_text.strip():
-        channel = interaction.channel
+        # In chats the bot isn't part of, Discord may not give us a channel object
+        channel = interaction.channel or bot.get_partial_messageable(
+            interaction.channel_id
+        )
         if check_busy and channel.id in active_loops:
             return [], ["A loop is already running in this channel. Use /stop first"]
         return [channel], notes
@@ -464,12 +538,20 @@ async def channels_autocomplete(
 
 
 # ---------------------------------------------------------------- loops
-async def _run_loop(channel, get_content, times, delay, prepared):
+async def _run_loop(channel, get_content, times, delay, prepared, interaction=None):
     """times == 0 means keep going until stopped."""
+    in_dm = interaction is not None and interaction.guild_id is None
+    use_followup = False
     try:
         sent = 0
         while times == 0 or sent < times:
-            if not await safe_send(channel, get_content(), prepared):
+            if in_dm:
+                ok, use_followup = await send_in_dm(
+                    channel, get_content(), prepared, interaction, use_followup
+                )
+            else:
+                ok = await safe_send(channel, get_content(), prepared)
+            if not ok:
                 break
             sent += 1
             await asyncio.sleep(delay)
@@ -502,7 +584,9 @@ async def start_loops(
         return
 
     for ch in targets:
-        task = asyncio.create_task(_run_loop(ch, get_content, times, delay, prepared))
+        task = asyncio.create_task(
+            _run_loop(ch, get_content, times, delay, prepared, interaction)
+        )
         active_loops[ch.id] = task
 
     text = f"{summary} in {', '.join(label(c) for c in targets)}"
@@ -524,6 +608,9 @@ async def help_command(interaction: discord.Interaction):
         "/infsend (Message and/or image, Delay, Channels)\n"
         "/randsend (Mode, Length, Times, Image, Delay, Channels)\n"
         "/stop (Quit ping loops here, or in the Channels you list)\n"
+        "/test (Check that the bot is responding)\n"
+        "/version (Show the current bot version)\n"
+        "---- Server only commands ----\n"
         "/stopall (Quit all ping loops)\n"
         "/ban, /unban, /banlist (Admins, or roles allowed with /perms - block people from the bot)\n"
         "/setup (Admins only - panel for bot access, per-command permissions and bans)\n"
@@ -535,13 +622,27 @@ async def help_command(interaction: discord.Interaction):
 # test
 @bot.tree.command(name="test", description="Check that the bot is responding")
 async def test(interaction: discord.Interaction):
-    await interaction.response.send_message("I am alive and well!")
+    # Time a real round trip to Discord: send a message, then see how long it took
+    start = time.perf_counter()
+    await interaction.response.send_message("Pinging...")
+    response_ms = (time.perf_counter() - start) * 1000
+
+    latency = bot.latency  # gateway heartbeat, in seconds (nan before it's measured)
+    ping = "n/a" if latency != latency else f"{latency * 1000:.0f} ms"
+
+    await interaction.edit_original_response(
+        content=(
+            "I am alive and well!\n"
+            f"Ping (gateway): {ping}\n"
+            f"Response time: {response_ms:.0f} ms"
+        )
+    )
 
 
 # version
 @bot.tree.command(name="version", description="Show the current bot version")
 async def version(interaction: discord.Interaction):
-    await interaction.response.send_message("Autopinger Release 1.1")
+    await interaction.response.send_message("Autopinger (Name not final) Release 1")
 
 
 # send a singular message
@@ -846,7 +947,7 @@ class SetupView(discord.ui.View):
         self.build()
 
     async def interaction_check(self, interaction: discord.Interaction) -> bool:
-        if interaction.user.id == self.author_id and await can_manage(interaction):
+        if interaction.user.id == self.author_id and is_server_admin(interaction):
             return True
         await interaction.response.send_message(
             "This panel isn't yours. Use /setup to open your own", ephemeral=True
@@ -1109,9 +1210,9 @@ class SetupView(discord.ui.View):
 @app_commands.guild_only()
 @app_commands.default_permissions(administrator=True)
 async def setup(interaction: discord.Interaction):
-    if not await can_manage(interaction):
+    if not is_server_admin(interaction):
         await interaction.response.send_message(
-            "Only the bot owner or server administrators can use /setup",
+            "Only server administrators can use /setup",
             ephemeral=True,
         )
         return
