@@ -102,6 +102,8 @@ def load_data():
         data["permissions"] = {}
     if not isinstance(data.get("access"), dict):
         data["access"] = {}
+    if not isinstance(data.get("welcomed"), list):
+        data["welcomed"] = []  # servers that already got the welcome message
     ban_data = data.get("bans")
     if not isinstance(ban_data, dict):
         ban_data = data["bans"] = {}
@@ -226,6 +228,14 @@ class BanlistTree(app_commands.CommandTree):
             return True
 
         name = (interaction.data or {}).get("name")
+        # /setup and /perms are strictly admin / bot owner, whatever Discord's
+        # per-server command overrides say
+        if name in ("perms", "setup") and not await can_manage(interaction):
+            await interaction.response.send_message(
+                f"Only the bot owner or server administrators can use /{name}.",
+                ephemeral=True,
+            )
+            return False
         if name and name not in ("perms", "setup") and not await can_use(interaction, name):
             await interaction.response.send_message(
                 f"You don't have permission to use /{name} here.", ephemeral=True
@@ -262,6 +272,33 @@ bot = Autopinger()
 
 # channel id -> running loop task (one loop per channel)
 active_loops = {}
+
+
+WELCOME_MESSAGE = (
+    "Autopinger! Everyone's favorite spam pinging bot! "
+    "Use /setup before doing anything"
+)
+
+
+# sent once, the first time the bot joins a server
+@bot.event
+async def on_guild_join(guild):
+    if guild.id in data["welcomed"]:
+        return  # re-invited: they've already seen it
+
+    me = guild.me
+    candidates = [guild.system_channel] + list(guild.text_channels)
+    for channel in candidates:
+        if channel is None or not channel.permissions_for(me).send_messages:
+            continue
+        try:
+            await channel.send(WELCOME_MESSAGE)
+        except discord.HTTPException:
+            continue
+        data["welcomed"].append(guild.id)
+        save_data()
+        return
+    print(f"Couldn't send the welcome message in {guild} (no channel to post in)")
 
 
 # startup message
